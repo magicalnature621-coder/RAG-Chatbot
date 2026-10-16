@@ -655,6 +655,13 @@ openConfigBtn.addEventListener("click", async () => {
   }
 });
 
+// Typing a key selects its provider, so saving a new key never leaves the bot on "Local".
+[[configGroqKey, "groq"], [configGeminiKey, "gemini"], [configOpenaiKey, "openai"]].forEach(([input, provider]) => {
+  input.addEventListener("input", () => {
+    if (input.value.trim()) configProvider.value = provider;
+  });
+});
+
 closeConfigModal.addEventListener("click", () => {
   configModal.classList.add("hidden");
 });

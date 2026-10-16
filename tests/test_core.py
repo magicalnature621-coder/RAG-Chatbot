@@ -137,3 +137,34 @@ def test_vector_store_concurrent_upsert_and_search(tmp_path):
         t.join()
     assert not errors, errors
     assert store.get_stats()["total_documents"] == 3
+
+
+def test_saving_key_while_on_local_switches_provider():
+    # The Settings dropdown shows "local" until a key exists; saving a key from
+    # that state must not lock the bot into offline mode.
+    _, headers = _register()
+    res = client.post("/api/config", json={"llm_provider": "local", "groq_api_key": "gsk_test"}, headers=headers)
+    assert res.status_code == 200
+    try:
+        assert database.get_setting("llm_provider") == "groq"
+        # Choosing "local" on purpose (no new key) is still respected.
+        client.post("/api/config", json={"llm_provider": "local"}, headers=headers)
+        assert database.get_setting("llm_provider") == "local"
+    finally:
+        database.set_setting("groq_api_key", "")
+
+
+def test_fallback_answer_explains_provider_failure(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    database.set_setting("llm_provider", "groq")
+    llm = LLMProvider()
+
+    def boom(key, messages):
+        raise RuntimeError("Error code: 401 - Invalid API Key")
+
+    monkeypatch.setattr(llm, "_call_groq", boom)
+    chunk = {"title": "T", "source_url": "https://x", "text": "The hostel fee is 5000 per semester."}
+    answer, provider = llm.generate("hostel fee", [chunk])
+    assert provider == "local"
+    assert "Invalid API Key" in answer
+    assert "no AI model is configured" not in answer

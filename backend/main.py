@@ -244,16 +244,27 @@ def get_config():
 
 @app.post("/api/config")
 def update_config(req: ConfigRequest, user: Dict[str, Any] = Depends(get_current_user)):
-    if req.llm_provider:
-        if req.llm_provider not in VALID_PROVIDERS:
-            raise HTTPException(status_code=400, detail=f"llm_provider must be one of {sorted(VALID_PROVIDERS)}")
-        set_setting("llm_provider", req.llm_provider)
-    if req.groq_api_key is not None:
-        set_setting("groq_api_key", req.groq_api_key)
-    if req.gemini_api_key is not None:
-        set_setting("gemini_api_key", req.gemini_api_key)
-    if req.openai_api_key is not None:
-        set_setting("openai_api_key", req.openai_api_key)
+    provider = req.llm_provider
+    if provider and provider not in VALID_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"llm_provider must be one of {sorted(VALID_PROVIDERS)}")
+
+    new_keys = {
+        "groq": (req.groq_api_key or "").strip(),
+        "gemini": (req.gemini_api_key or "").strip(),
+        "openai": (req.openai_api_key or "").strip(),
+    }
+    for name, key in new_keys.items():
+        if key:
+            set_setting(f"{name}_api_key", key)
+
+    # The Settings dropdown shows "local" until a key exists, so a first-time
+    # user who pastes a key and clicks Save would otherwise lock the bot into
+    # offline mode. Saving a key while on "local" switches to that provider.
+    added = [name for name, key in new_keys.items() if key]
+    if provider in (None, "local") and added:
+        provider = added[0]
+    if provider:
+        set_setting("llm_provider", provider)
     if req.college_website_url:
         if not req.college_website_url.startswith(("http://", "https://")):
             raise HTTPException(status_code=400, detail="college_website_url must start with http:// or https://")
