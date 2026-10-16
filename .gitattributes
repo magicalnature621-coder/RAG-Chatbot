@@ -1,0 +1,3 @@
+# Keep LF line endings in the repo regardless of contributors' git settings
+* text=auto eol=lf
+*.db binary

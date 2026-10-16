@@ -33,9 +33,12 @@
    professors", "what are the placement packages".
 
 ## Known limits
-- The page structure was not visible from here. The extractor handles HTML
-  tables. If diagnose_dynamic_pages.py reports 0 records, the markup is card
-  or div based, and the extractor needs the selectors from data/debug/faculty.html.
+- The live Faculty page uses cards, not tables. extract_faculty tries tables
+  first, then the card parser (extract_faculty_cards), which reads name,
+  designation, research areas, qualification, phone, room and email (the site
+  writes emails as "name at iiitkottayam dot ac.in"). If the site's card markup
+  changes and diagnose_dynamic_pages.py reports 0 records, update the selectors
+  in extract_faculty_cards from data/debug/faculty.html.
 - The placement text includes the site navigation menu, which is noisy.
   Tightening it needs the page's main content selector.
 - Intent words such as "email" or "director" will also trigger the faculty
