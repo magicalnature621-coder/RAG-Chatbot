@@ -34,7 +34,15 @@ CHITCHAT_SYSTEM_NOTE = (
 )
 
 
-def generate_local_extractive_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
+NO_MODEL_NOTE = (
+    "Basic mode - no AI model is configured, so this is a direct excerpt rather than a "
+    "written answer. Add a free Groq or Gemini API key in Settings for natural, more "
+    "accurate responses."
+)
+
+
+def generate_local_extractive_answer(query: str, chunks: List[Dict[str, Any]],
+                                     note: str = NO_MODEL_NOTE) -> str:
     """
     Fallback used only when no LLM API key is configured (provider == 'local').
     This is intentionally conservative: it never invents specific facts (like
@@ -47,8 +55,7 @@ def generate_local_extractive_answer(query: str, chunks: List[Dict[str, Any]]) -
         return (
             "I couldn't find anything relevant to that in the college website records. "
             "You can check the official portal at https://iiitkottayam.ac.in/#!/home.\n\n"
-            "_(Basic mode - no AI model is configured, so I can only match text directly. "
-            "Add a free Groq or Gemini API key in Settings for natural, more accurate answers.)_"
+            f"_({note})_"
         )
 
     top_chunk = chunks[0]
@@ -119,9 +126,7 @@ def generate_local_extractive_answer(query: str, chunks: List[Dict[str, Any]]) -
     return (
         f"Here's what I found on **{source_title}**:\n\n{bullets}\n\n"
         f"*Source: [{source_title}]({source_url})*\n\n"
-        "_(Basic mode - no AI model is configured, so this is a direct excerpt rather than a "
-        "written answer. Add a free Groq or Gemini API key in Settings for natural, more "
-        "accurate responses.)_"
+        f"_({note})_"
     )
 
 
@@ -246,6 +251,7 @@ class LLMProvider:
         system_prompt = f"{SYSTEM_PROMPT}\n\n{CHITCHAT_SYSTEM_NOTE}"
         messages = self._messages(system_prompt, context_str, query, history)
 
+        errors = []
         for provider in self._candidate_providers():
             key = _get_key(provider)
             try:
@@ -258,11 +264,26 @@ class LLMProvider:
                 if answer and answer.strip():
                     return answer, provider
                 print(f"{provider} returned an empty answer; trying next provider.")
+                errors.append(f"{provider}: empty response")
             except Exception as e:
                 print(f"{provider} error: {e}")
+                errors.append(f"{provider}: {str(e)[:200]}")
 
-        # Local fallback (no API key configured, "local" chosen, or every provider failed)
-        return generate_local_extractive_answer(query, chunks), "local"
+        # Local fallback (no API key configured, "local" chosen, or every provider failed).
+        # Say which of those it was, so a broken key is not mistaken for "no key".
+        if errors:
+            note = (
+                "Basic mode - the AI model request failed (" + "; ".join(errors) + "), so this is "
+                "a direct excerpt instead. Check the API key in Settings and the server console."
+            )
+        elif get_setting("llm_provider") == "local" and any(_get_key(p) for p in PROVIDER_ORDER):
+            note = (
+                "Basic mode - Settings is set to 'Local', so the saved API key is not used. "
+                "Choose Groq, Gemini or OpenAI in Settings to get written answers."
+            )
+        else:
+            note = NO_MODEL_NOTE
+        return generate_local_extractive_answer(query, chunks, note), "local"
 
     def generate_response(self, query: str, chunks: List[Dict[str, Any]],
                           history: Optional[List[Dict[str, str]]] = None) -> str:
