@@ -17,7 +17,7 @@ Featuring a **ChatGPT/Claude-style conversational UI**, **User Authentication (L
 
 2. **User Authentication & Session Security**:
    - User registration and login powered by PBKDF2 HMAC SHA-256 password hashing with unique salts.
-   - Session tokens persisted per user in SQLite (`data/college_rag.db`).
+   - Random, revocable session tokens persisted in SQLite (`data/college_rag.db`); logging out invalidates the token.
 
 3. **SPA-Aware Web Crawler & Document Loaders**:
    - Specially built to traverse IIIT Kottayam's AngularJS router (`scripts/app.js`), discovering and indexing over 40+ official view templates (`views/admission.html`, `views/placement.html`, `views/btech_cs_home.html`, faculty pages, etc.).
@@ -29,8 +29,8 @@ Featuring a **ChatGPT/Claude-style conversational UI**, **User Authentication (L
    - Background periodic daemon timer + manual **"Crawl & Sync Now"** button in the UI.
 
 5. **Multi-Model LLM Engine**:
-   - **Groq** (Llama 3.3 70B / 3.1 8B) - ultra-fast inference with free tier.
-   - **Google Gemini** (Gemini 1.5/2.5 Flash).
+   - **Groq** (GPT-OSS 120B) - ultra-fast inference with free tier.
+   - **Google Gemini** (Gemini 2.5 Flash).
    - **OpenAI** (GPT-4o-mini).
    - **Built-in Offline Fallback**: Works 100% locally with grounded extractive synthesis if no API key is provided, guaranteeing zero crashes.
 
@@ -75,7 +75,7 @@ Featuring a **ChatGPT/Claude-style conversational UI**, **User Authentication (L
 |                     | (New/Updated Chunks)                             | (Relevant Chunks)       |
 |                     v                                                  |                         |
 |   +------------------------------------+          +--------------------+---------------------+   |
-|   |      SQLite Database               |          |       Vector Store (data/vectors.json)   |   |
+|   |      SQLite Database               |          |       Vector Store (vector_index.json)   |   |
 |   |  - `crawled_pages` (url, hash, dt) | <----->  |  - Incremental upsert & delete by URL    |   |
 |   |  - `users`, `sessions`, `messages` |          |  - Fast similarity search                |   |
 |   +------------------------------------+          +------------------------------------------+   |
@@ -93,17 +93,39 @@ Featuring a **ChatGPT/Claude-style conversational UI**, **User Authentication (L
   pip install -r requirements.txt
   ```
 
-### 2. Launch the Application
+### 2. Configure an LLM (optional)
+Copy `.env.example` to `.env` and add at least one API key (Groq has a free tier).
+Without a key the bot still works in offline extractive mode. Keys can also be
+entered from the Settings dialog in the UI.
+
+For the JS-rendered Faculty and Placement pages, also install Playwright's browser:
+```bash
+playwright install chromium
+```
+
+### 3. Launch the Application
 Run the one-click starter:
 ```bash
 python run.py
 ```
 
-### 3. Open in Browser
+### 4. Open in Browser
 Navigate to:
 ```
 http://127.0.0.1:8000
 ```
+
+---
+
+## Running the Tests
+```bash
+pip install pytest
+pytest
+```
+This runs the offline suite in `tests/` (auth, sessions, provider selection, vector
+store concurrency) against a throwaway database. `test_api.py` and
+`test_verification.py` are live integration scripts that crawl the real site; run
+them directly with `python test_api.py`.
 
 ---
 
