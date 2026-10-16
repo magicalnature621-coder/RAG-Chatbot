@@ -1,0 +1,14 @@
+# Secrets - copy .env.example to .env and fill in your own keys
+.env
+
+# Runtime data: user accounts, chat history, login tokens, crawler debug dumps
+data/college_rag.db
+data/*.tmp
+data/debug/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
