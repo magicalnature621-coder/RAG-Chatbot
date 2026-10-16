@@ -75,7 +75,7 @@ class RAGPipeline:
         # the top-k fragments. The structured chunk goes first so it always
         # reaches the LLM (llm.py only reads the first 4 chunks).
         intent = detect_structured_intent(search_query)
-        structured_chunk = structured_context_chunk(intent) if intent else None
+        structured_chunk = structured_context_chunk(intent, user_question) if intent else None
         if structured_chunk:
             retrieved_chunks = [structured_chunk] + [
                 c for c in retrieved_chunks if c["source_url"] != structured_chunk["source_url"]

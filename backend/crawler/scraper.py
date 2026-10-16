@@ -12,7 +12,11 @@ class SmartHTMLParser(HTMLParser):
         self.title: str = ""
         self.in_title: bool = False
         self.ignore_depth: int = 0
-        self.ignore_tags: Set[str] = {'script', 'style', 'noscript', 'meta', 'link', 'svg', 'path'}
+        # Only tags that always have a closing tag may go here: the depth counter
+        # is decremented on the end tag. Void elements like <meta>/<link> never
+        # close, so listing them made everything after the first <meta> vanish
+        # from browser-rendered pages. They carry no text anyway.
+        self.ignore_tags: Set[str] = {'script', 'style', 'noscript', 'svg', 'template'}
 
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]):
         tag_lower = tag.lower()
@@ -45,6 +49,9 @@ class SmartHTMLParser(HTMLParser):
 
         if tag_lower == 'title':
             self.in_title = False
+
+        if self.ignore_depth > 0:
+            return
 
         if tag_lower in {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'section', 'article'}:
             self.fed.append('\n')

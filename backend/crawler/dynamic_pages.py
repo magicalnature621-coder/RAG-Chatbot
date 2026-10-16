@@ -8,6 +8,7 @@ departments, phones or emails. This module renders the page in a headless
 browser, waits for Angular to finish binding, rejects output that still holds
 placeholders, and turns HTML tables into clean records.
 """
+import html as html_lib
 import json
 import logging
 import os
@@ -29,7 +30,10 @@ DEBUG_DIR = os.path.join(
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?:\+91[\s-]?)?(?:0?\d{10}|\d{3,5}[\s-]\d{5,8})")
-PLACEHOLDER_RE = re.compile(r"\{\{.*?\}\}|\b(contact_phone|location_on|insert_link)\b")
+# Only raw Angular bindings mean "not rendered". Words like contact_phone /
+# location_on are Material icon names that also appear on correctly rendered
+# pages, so they must not count (they made every real faculty row get rejected).
+PLACEHOLDER_RE = re.compile(r"\{\{.*?\}\}")
 
 
 def has_unrendered_placeholders(text: str) -> bool:
@@ -199,6 +203,82 @@ def save_debug_dump(name: str, rendered: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Public entry points used by the crawler
 # ---------------------------------------------------------------------------
+FACULTY_CARD_RE = re.compile(r'<div[^>]*ng-repeat="faculty in faculties[^"]*"[^>]*>')
+CARD_END_MARKER = "<!-- end ngRepeat: faculty in faculties"
+ICON_RE = re.compile(r"<i[^>]*material-icons[^>]*>.*?</i>", re.S)
+
+
+def _fragment_text(fragment: str) -> str:
+    fragment = ICON_RE.sub(" ", fragment)
+    fragment = re.sub(r"<br\s*/?>", " / ", fragment)
+    fragment = re.sub(r"<[^>]+>", " ", fragment)
+    return re.sub(r"\s+", " ", html_lib.unescape(fragment)).strip(" /")
+
+
+def _deobfuscate_email(text: str) -> str:
+    """The site writes emails as 'name at iiitkottayam dot ac.in'."""
+    m = EMAIL_RE.search(text)
+    if m:
+        return m.group(0)
+    text = re.sub(r"\s+at\s+", "@", text.strip(), flags=re.IGNORECASE)
+    text = re.sub(r"\s+dot\s+", ".", text, flags=re.IGNORECASE)
+    m = EMAIL_RE.search(text)
+    return m.group(0) if m else ""
+
+
+def extract_faculty_cards(html: str) -> List[Dict[str, str]]:
+    """
+    The live Faculty page renders one card per person (no <table>):
+    <h5> name, sub-head rows for role/designation and a bold qualification,
+    <li> research areas, and contact "chips" for phone, room and email.
+    """
+    records: List[Dict[str, str]] = []
+    for part in FACULTY_CARD_RE.split(html)[1:]:
+        end = part.find(CARD_END_MARKER)
+        if end != -1:
+            part = part[:end]
+        part = re.sub(r"<!--.*?-->", "", part, flags=re.S)
+
+        m = re.search(r"<h5[^>]*>(.*?)</h5>", part, re.S)
+        name = _fragment_text(m.group(1)) if m else ""
+        if not name or has_unrendered_placeholders(name):
+            continue
+
+        designation, qualification = [], ""
+        for sub in re.findall(r'<div class="custom-card-sub-head[^"]*"[^>]*>(.*?)</div>', part, re.S):
+            text = _fragment_text(sub)
+            if not text:
+                continue
+            if re.search(r"<b[\s>]", sub):
+                qualification = text
+            else:
+                designation.append(text)
+
+        areas = [_fragment_text(a) for a in re.findall(
+            r'<li[^>]*ng-repeat="area in faculty\.area"[^>]*>(.*?)</li>', part, re.S)]
+
+        contact = {"phone": "", "room": "", "email": ""}
+        for field, cls, body in re.findall(
+                r'<div ng-show="faculty\.contact\.(phone|room|email)" class="([^"]*)"[^>]*>(.*?)</div>', part, re.S):
+            if "ng-hide" in cls:
+                continue
+            text = _fragment_text(body)
+            contact[field] = _deobfuscate_email(text) if field == "email" else text
+        contact["room"] = re.sub(r"^Room No:\s*", "", contact["room"])
+
+        records.append({
+            "name": name,
+            "department": "",
+            "designation": " / ".join(designation),
+            "phone": contact["phone"],
+            "email": contact["email"],
+            "room": contact["room"],
+            "areas": ", ".join(a for a in areas if a),
+            "qualification": qualification,
+        })
+    return records
+
+
 def extract_faculty(html: str) -> List[Dict[str, str]]:
     records: List[Dict[str, str]] = []
     for table in extract_tables(html):
@@ -206,6 +286,8 @@ def extract_faculty(html: str) -> List[Dict[str, str]]:
             fac = canonical_faculty(raw)
             if fac:
                 records.append(fac)
+    if not records:
+        records = extract_faculty_cards(html)
     # de-duplicate on name+department (tables sometimes repeat on mobile layouts)
     seen, unique = set(), []
     for r in records:
