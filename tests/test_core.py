@@ -168,3 +168,34 @@ def test_fallback_answer_explains_provider_failure(monkeypatch):
     assert provider == "local"
     assert "Invalid API Key" in answer
     assert "no AI model is configured" not in answer
+
+
+def _degree_store(tmp_path):
+    store = VectorStore(index_path=str(tmp_path / "idx.json"))
+    pages = {
+        "btech_cs_home": ("B.Tech Computer Science", "The B.Tech programme offers specializations in computer science and technology."),
+        "btech_ai_home": ("B.Tech AI & Data Science", "B.Tech students specialize in AI. Admission to B.Tech is through JEE."),
+        "mtech_home": ("M.Tech Programmes", "The institute offers M.Tech programmes with specializations for graduates."),
+        "phd_home": ("PhD Admissions", "Ph.D admission is open in computer science and electronics research areas."),
+    }
+    for route, (title, text) in pages.items():
+        store.upsert_document(f"https://x/#!/{route}", title, text, f"https://x/#!/{route}")
+    return store
+
+
+def test_degree_names_are_single_tokens():
+    from backend.rag.vector_store import tokenize_cleaned
+    assert tokenize_cleaned("M.Tech, M Tech, Ph.D and B. Tech") == ["mtech", "mtech", "phd", "btech"]
+
+
+def test_search_finds_mtech_and_phd_pages_not_btech(tmp_path):
+    store = _degree_store(tmp_path)
+    urls = [r["source_url"] for r in store.search("What M.Tech and PhD specializations are available?", top_k=2)]
+    assert any("mtech_home" in u for u in urls)
+    assert any("phd_home" in u for u in urls)
+
+
+def test_search_still_prefers_btech_pages_for_btech_questions(tmp_path):
+    store = _degree_store(tmp_path)
+    top = store.search("What B.Tech specializations are offered?", top_k=2)
+    assert all("btech" in r["source_url"] for r in top)

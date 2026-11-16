@@ -63,12 +63,32 @@ INTENT_BOOSTS = {
     ],
     ("ragging", "antiragging", "harassment", "grievance", "rules"): [
         "antiragging"
-    ]
+    ],
+    # Postgraduate programmes. Degree names are normalized to one token
+    # ("M.Tech" -> "mtech", "Ph.D" -> "phd") by tokenize_cleaned.
+    ("mtech",): ["mtech"],
+    ("phd",): ["phd"],
 }
+
+# "M.Tech", "M. Tech", "M Tech" and "MTech" all mean the same degree. Without
+# this, "M.Tech" became the tokens "m" + "tech", and "tech" matched every
+# B.Tech page instead of the M.Tech ones.
+_DEGREE_PATTERNS = [
+    (re.compile(r'\bb\.?\s?tech\b'), 'btech'),
+    (re.compile(r'\bm\.?\s?tech\b'), 'mtech'),
+    (re.compile(r'\bph\.?\s?d\b'), 'phd'),
+]
+
+
+def normalize_degrees(text: str) -> str:
+    text = text.lower()
+    for pattern, replacement in _DEGREE_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 def tokenize_cleaned(text: str) -> List[str]:
     # Extract alphanumeric words and lowercase
-    words = re.findall(r'\b[a-zA-Z0-9_]+\b', text.lower())
+    words = re.findall(r'\b[a-zA-Z0-9_]+\b', normalize_degrees(text))
     return [w for w in words if w not in STOPWORDS]
 
 class VectorStore:
@@ -183,6 +203,10 @@ class VectorStore:
         for trigger_words, targets in INTENT_BOOSTS.items():
             if any(tw in q_tokens or tw in query.lower() for tw in trigger_words):
                 intent_targets.extend(targets)
+        # Generic words like "specializations" or "programmes" boost the B.Tech
+        # pages; when the question names only M.Tech/PhD, those are the wrong pages.
+        if ("mtech" in q_tokens or "phd" in q_tokens) and "btech" not in q_tokens:
+            intent_targets = [t for t in intent_targets if t != "btech"]
 
         # 1. Cosine similarity
         query_vec = np.array(self.embedder.embed_text(query), dtype=np.float32)
@@ -241,6 +265,22 @@ class VectorStore:
             })
 
         results.sort(key=lambda x: x["score"], reverse=True)
+
+        # A question about several degrees ("M.Tech and PhD specializations")
+        # needs results for each; otherwise the best-scoring one fills every slot.
+        degrees = [d for d in ("btech", "mtech", "phd") if d in q_tokens]
+        if len(degrees) > 1:
+            per_degree = [[r for r in results if d in r["source_url"].lower()] for d in degrees]
+            picked, seen = [], set()
+            for rank in range(top_k):
+                for group in per_degree:
+                    if rank < len(group) and group[rank]["chunk_id"] not in seen:
+                        picked.append(group[rank])
+                        seen.add(group[rank]["chunk_id"])
+            picked = picked[:top_k]
+            picked += [r for r in results if r["chunk_id"] not in seen][:top_k - len(picked)]
+            return picked
+
         return results[:top_k]
 
     def get_stats(self) -> Dict[str, Any]:
