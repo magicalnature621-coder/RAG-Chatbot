@@ -11,20 +11,72 @@ DB_PATH = os.environ.get("COLLEGE_RAG_DB_PATH") or os.path.join(DB_DIR, "college
 def _now() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-def get_db_connection() -> sqlite3.Connection:
+# When a Postgres URL is configured (e.g. Neon via the Vercel integration) all
+# data lives there; otherwise a local SQLite file is used. Serverless hosts
+# like Vercel wipe the local disk, so a hosted database is required there.
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
+
+
+class _PgCursor:
+    """Makes a psycopg cursor accept the sqlite-style "?" placeholders used below."""
+
+    def __init__(self, cur):
+        self._cur = cur
+
+    def execute(self, sql: str, params=()):
+        self._cur.execute(sql.replace("?", "%s"), params)
+        return self
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+    @property
+    def rowcount(self) -> int:
+        return self._cur.rowcount
+
+
+class _PgConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self) -> _PgCursor:
+        return _PgCursor(self._conn.cursor())
+
+    def execute(self, sql: str, params=()) -> _PgCursor:
+        return self.cursor().execute(sql, params)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
+def get_db_connection():
+    if USE_POSTGRES:
+        import psycopg
+        from psycopg.rows import dict_row
+        return _PgConnection(psycopg.connect(DATABASE_URL, row_factory=dict_row))
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+# Auto-increment primary key syntax differs between the two databases.
+_SERIAL_PK = "SERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
     # 1. Users table
-    cursor.execute("""
+    cursor.execute(f"""
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {_SERIAL_PK},
         username TEXT UNIQUE NOT NULL,
         email TEXT,
         password_hash TEXT NOT NULL,
@@ -59,9 +111,9 @@ def init_db():
     """)
     
     # 4. Crawled pages table
-    cursor.execute("""
+    cursor.execute(f"""
     CREATE TABLE IF NOT EXISTS crawled_pages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {_SERIAL_PK},
         url TEXT UNIQUE NOT NULL,
         title TEXT NOT NULL,
         content_hash TEXT NOT NULL,
@@ -109,10 +161,10 @@ def create_user(username: str, email: str, password_hash: str, salt: str) -> int
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO users (username, email, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO users (username, email, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
         (username, email, password_hash, salt, _now())
     )
-    user_id = cursor.lastrowid
+    user_id = cursor.fetchone()["id"]
     conn.commit()
     conn.close()
     return user_id
@@ -267,6 +319,10 @@ def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
 
 def set_setting(key: str, value: str):
     conn = get_db_connection()
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value)
+    )
     conn.commit()
     conn.close()

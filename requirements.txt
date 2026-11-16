@@ -8,7 +8,5 @@ requests>=2.31.0
 groq>=0.9.0
 python-dotenv>=1.0.0
 
-# Optional: enables real JS-rendered crawling (needed for Faculty/Dept Head
-# pages, which populate via AngularJS AJAX rather than static HTML).
-# After installing, also run: playwright install chromium
-playwright
+# Postgres driver, used when DATABASE_URL is set (e.g. on Vercel with Neon).
+psycopg[binary]>=3.1

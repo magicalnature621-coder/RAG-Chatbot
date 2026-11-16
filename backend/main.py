@@ -1,5 +1,6 @@
 import os
 import uuid
+import hashlib
 import threading
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
@@ -23,7 +24,8 @@ from backend.database import (
     add_message,
     get_all_crawled_pages,
     get_setting,
-    set_setting
+    set_setting,
+    upsert_crawled_page
 )
 from backend.auth import register_user, authenticate_user, get_current_user, revoke_token
 from backend.rag.pipeline import get_rag_pipeline
@@ -37,6 +39,11 @@ FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 DEFAULT_SITE_URL = "https://iiitkottayam.ac.in/#!/home"
 VALID_PROVIDERS = {"local", "groq", "gemini", "openai"}
 
+# Vercel sets VERCEL=1. Serverless functions have a read-only disk and are
+# frozen between requests, so background crawling/scheduling cannot run there;
+# the app answers from the knowledge base bundled in data/vector_index.json.
+SERVERLESS = bool(os.environ.get("VERCEL"))
+
 # Tables must exist before any request (or test client) touches the database.
 init_db()
 
@@ -45,9 +52,32 @@ rag_pipeline = get_rag_pipeline()
 crawler = CollegeCrawler(vector_store=rag_pipeline.vector_store)
 scheduler = CrawlerScheduler(crawler=crawler)
 
+def _seed_pages_from_index():
+    """List the bundled index's pages in the Knowledge Base view when nothing has been crawled here."""
+    if get_all_crawled_pages():
+        return
+    docs: Dict[str, Dict[str, Any]] = {}
+    for c in rag_pipeline.vector_store.chunks:
+        d = docs.setdefault(c["source_url"], {"title": c.get("title") or c["source_url"], "texts": []})
+        d["texts"].append(c["text"])
+    for url, d in docs.items():
+        content_hash = hashlib.sha256("\n".join(d["texts"]).encode("utf-8")).hexdigest()
+        upsert_crawled_page(url, d["title"], content_hash, len(d["texts"]), "bundled")
+
+
+if SERVERLESS:
+    try:
+        _seed_pages_from_index()
+    except Exception as e:  # never block startup on this cosmetic step
+        print(f"Could not seed crawled pages from bundled index: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    if SERVERLESS:
+        yield
+        return
     # Start periodic scheduler
     scheduler.start(interval_hours=6.0)
 
@@ -197,6 +227,12 @@ def post_message(
 # --- Crawler & Sync Routes ---
 @app.post("/api/crawler/sync")
 def trigger_sync(req: Optional[SyncRequest] = None, user: Dict[str, Any] = Depends(get_current_user)):
+    if SERVERLESS:
+        raise HTTPException(
+            status_code=400,
+            detail="Live crawling is not available on this deployment. The knowledge base is "
+                   "refreshed by re-crawling locally and redeploying data/vector_index.json."
+        )
     target_url = req.target_url if req else None
     if target_url and not target_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="target_url must start with http:// or https://")

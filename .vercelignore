@@ -1,0 +1,10 @@
+.git
+.env
+tests
+scripts
+test_api.py
+test_verification.py
+pytest.ini
+data/college_rag.db
+data/debug
+**/__pycache__
