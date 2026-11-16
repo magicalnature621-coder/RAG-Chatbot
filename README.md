@@ -98,8 +98,9 @@ Copy `.env.example` to `.env` and add at least one API key (Groq has a free tier
 Without a key the bot still works in offline extractive mode. Keys can also be
 entered from the Settings dialog in the UI.
 
-For the JS-rendered Faculty and Placement pages, also install Playwright's browser:
+For the JS-rendered Faculty and Placement pages, also install Playwright and its browser:
 ```bash
+pip install -r requirements-crawler.txt
 playwright install chromium
 ```
 
@@ -114,6 +115,26 @@ Navigate to:
 ```
 http://127.0.0.1:8000
 ```
+
+---
+
+## Deploying to Vercel
+
+The repo is set up to deploy as a single Vercel Python function (`api/index.py`,
+configured in `vercel.json`) that serves both the API and the frontend.
+
+1. **Import the repo** at [vercel.com/new](https://vercel.com/new). No build settings are needed.
+2. **Add a database**: in the project's **Storage** tab, add **Neon** (Postgres, free tier) and
+   connect it to the project. This sets `DATABASE_URL`, which the app uses for users, chats and
+   settings instead of the local SQLite file (Vercel's disk is temporary).
+3. **Add an LLM key** under **Settings → Environment Variables**, e.g. `GROQ_API_KEY`.
+4. **Redeploy** so the new variables take effect.
+
+On Vercel the bot answers from the knowledge base committed in `data/vector_index.json`.
+Serverless functions can't run background jobs, so the periodic crawler and the
+"Crawl & Sync Now" button are disabled there. To refresh the knowledge base, run the app
+locally (`python run.py`, then Crawl & Sync), commit the updated `data/vector_index.json`,
+and push; Vercel redeploys automatically.
 
 ---
 

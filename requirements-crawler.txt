@@ -1,0 +1,5 @@
+# Optional, for local crawling only: enables JS-rendered pages (Faculty/Dept Head
+# pages populate via AngularJS AJAX rather than static HTML).
+# After installing, also run: playwright install chromium
+-r requirements.txt
+playwright
