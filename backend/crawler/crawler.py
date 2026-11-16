@@ -10,6 +10,7 @@ from collections import deque
 
 from backend.crawler.scraper import parse_html
 from backend.crawler.dynamic_pages import (
+    main_content_html,
     render_dynamic_page,
     save_debug_dump,
     extract_faculty,
@@ -56,7 +57,7 @@ def render_with_browser(browser, url: str, wait_ms: int = 2500, timeout_ms: int 
             # load is still far better than nothing.
             page.goto(url, wait_until="load", timeout=timeout_ms)
         page.wait_for_timeout(wait_ms)  # let Angular's digest cycle settle after any XHR
-        content = page.content()
+        content = main_content_html(page)
         page.close()
         return content
     except Exception as e:

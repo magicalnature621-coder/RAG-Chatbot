@@ -145,6 +145,27 @@ def canonical_placement_row(rec: Dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 # Headless rendering
 # ---------------------------------------------------------------------------
+# The site's menu and footer sit outside Angular's <div ng-view>, which holds
+# the actual page. Indexing the whole document put the same menu text at the
+# top of every page, so search matched it instead of real content.
+_MAIN_CONTENT_JS = """() => {
+  const view = document.querySelector('[ng-view], ng-view, [ui-view]');
+  if (!view || view.innerText.trim().length < 50) return null;
+  const title = document.createElement('title');
+  title.textContent = document.title;
+  return '<html><head>' + title.outerHTML + '</head><body>' + view.outerHTML + '</body></html>';
+}"""
+
+
+def main_content_html(page) -> str:
+    """Rendered HTML of just the page's main content area, or the full page if there isn't one."""
+    try:
+        main = page.evaluate(_MAIN_CONTENT_JS)
+    except Exception:
+        main = None
+    return main or page.content()
+
+
 def render_dynamic_page(browser, url: str, timeout_ms: int = 30000) -> Optional[Dict[str, Any]]:
     """
     Loads the SPA route in a real browser, waits for Angular to replace the
@@ -177,7 +198,7 @@ def render_dynamic_page(browser, url: str, timeout_ms: int = 30000) -> Optional[
         except Exception:
             logger.warning(f"{url}: placeholders still visible after waiting; using what rendered.")
         page.wait_for_timeout(1500)
-        return {"html": page.content(), "xhr": xhr_log}
+        return {"html": main_content_html(page), "xhr": xhr_log}
     except Exception as e:
         logger.warning(f"Dynamic render failed for {url}: {e}")
         return None
