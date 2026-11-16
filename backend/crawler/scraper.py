@@ -85,7 +85,20 @@ class SmartHTMLParser(HTMLParser):
         )
         lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in raw_text.splitlines()]
         cleaned_lines = [l for l in lines if l]
-        return '\n'.join(cleaned_lines)
+        return clean_table_text('\n'.join(cleaned_lines))
+
+def clean_table_text(text: str) -> str:
+    """Collapse empty table cells, which otherwise become long runs of "| | | |"
+    with no content, and drop lines that contain no real text."""
+    out = []
+    for line in text.splitlines():
+        line = re.sub(r'\|(?:\s*\|)+', '|', line)       # empty cells -> one separator
+        line = re.sub(r'^[\s|]+|[\s|]+$', '', line)       # stray edge separators
+        line = re.sub(r'\s*\|\s*', ' | ', line)
+        if re.search(r'[A-Za-z0-9]', line):
+            out.append(line)
+    return '\n'.join(out)
+
 
 def parse_html(html_content: str, url: str) -> Dict[str, Any]:
     parser = SmartHTMLParser(base_url=url)

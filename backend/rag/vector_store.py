@@ -99,13 +99,21 @@ class VectorStore:
             for t in set(tokens):
                 self.df[t] = self.df.get(t, 0) + 1
 
+    @staticmethod
+    def has_content(text: str, min_chars: int = 20) -> bool:
+        """False for chunks with almost no letters/digits (e.g. leftover table borders)."""
+        return len(re.findall(r'[A-Za-z0-9]', text or "")) >= min_chars
+
     def load(self):
         if os.path.exists(self.index_path):
             try:
                 with open(self.index_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    self.chunks = data.get("chunks", [])
-                    self.embeddings = data.get("embeddings", [])
+                    chunks = data.get("chunks", [])
+                    embeddings = data.get("embeddings", [])
+                    keep = [i for i, c in enumerate(chunks) if self.has_content(c.get("text", ""))]
+                    self.chunks = [chunks[i] for i in keep]
+                    self.embeddings = [embeddings[i] for i in keep]
                 
                 if self.chunks:
                     texts = [c["text"] for c in self.chunks]
@@ -143,7 +151,10 @@ class VectorStore:
         self._rebuild_bm25_index()
 
     def upsert_document(self, doc_id: str, title: str, text: str, source_url: str) -> int:
-        new_chunks = self.chunker.chunk_document(doc_id, title, text, source_url)
+        new_chunks = [
+            c for c in self.chunker.chunk_document(doc_id, title, text, source_url)
+            if self.has_content(c["text"])
+        ]
         new_embeddings = [self.embedder.embed_text(c["text"]) for c in new_chunks]
         with self._lock:
             self._delete_locked(doc_id)
